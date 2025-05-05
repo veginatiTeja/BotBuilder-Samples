@@ -1,0 +1,46 @@
+﻿{
+  "type": "AdaptiveCard",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "What type of food do you eat?",
+      "wrap": true
+    },
+    {
+      "type": "Input.ChoiceSet",
+      "id": "foodSelection",
+      "style": "expanded",
+      "isMultiSelect": true,
+      "choices": [
+        {
+          "title": "juice",
+          "value": "juice"
+        },
+        {
+          "title": "icecream",
+          "value": "icecream"
+        },
+        {
+          "title": "choclate",
+          "value": "choclate"
+        },
+        {
+          "title": "food",
+          "value": "food"
+        },
+        {
+          "title": "chips",
+          "value": "chips"
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Submit",
+      "title": "Submit"
+    }
+  ],
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "version": "1.5"
+}
