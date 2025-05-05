@@ -331,6 +331,7 @@ async function smatbot_api(
 
 async function smatbot_facebook_automation(sender_id, resp, BOT_ID, answer, context) {
   let prev_response = await previous_question(BOT_ID, sender_id);
+  let get_language_code = "en"
 
   try {
     session_id = prev_response["cb_session"];
@@ -573,45 +574,217 @@ async function smatbot_facebook_automation(sender_id, resp, BOT_ID, answer, cont
 
     return;
   }
-
   else if (resp["type"] == "date") {
 
     let start_date = null;
     let end_date = null;
     let end = null;
     let start = null;
-    let date_options_formats = null
+    let date_options_formats = null;
     let date_default_options = resp["default_options"];
 
-    const datePickerCard = {
-      type: "AdaptiveCard",
-      body: [
-        {
-          type: "TextBlock",
-          text: "Please select your date of birth:",
-          wrap: true
-        },
-        {
-          type: "Input.Date",
-          id: "selectedDate",
-          placeholder: "Select a date"
-        }
-      ],
-      actions: [
-        {
-          type: "Action.Submit",
-          title: "Submit"
-        }
-      ],
-      $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-      version: "1.3"
-    };
+    try {
+      date_default_options = JSON.parse(date_default_options);
 
-    await context.sendActivity({
-      attachments: [CardFactory.adaptiveCard(datePickerCard)]
-    });
+      async function isArrayDateFormat(arr, dateFormat) {
+        return arr.every(item => dateFormat.test(item));
+      }
+
+      date_options_formats = await isArrayDateFormat(date_default_options.date_range[0], /^\d{4}-\d{2}-\d{2}$/);
+    } catch {
+      date_default_options = date_default_options;
+    }
+
+    if (date_default_options == "") {
+      let m_text;
+      if (multi_lang.hasOwnProperty('Enter the date in *dd-mm-yyyy* format please')) {
+        m_text = multi_lang['Enter the date in *dd-mm-yyyy* format please'][get_language_code];
+      }
+      question_text = `${question_text} \n ${m_text}`;
+      await context.sendActivity(question_text);
+    } else if (date_default_options["date_output_format"] && date_options_formats === false) {
+      let date_format = date_default_options["date_output_format"];
+      let m_text = multi_lang['Enter the date in *dd-mm-yyyy* format please'][get_language_code];
+      let gtu = m_text.replace('*dd-mm-yyyy*', date_format);
+      question_text = `${question_text} \n ${gtu}`;
+      await context.sendActivity(question_text);
+    } else if (
+      date_default_options &&
+      Object.keys(date_default_options).length > 0 &&
+      date_default_options.hasOwnProperty("date_range")
+    ) {
+      // 1. Start and end date from date_range
+      if (moment(date_default_options['date_range'][0][0], 'YYYY-MM-DD').isValid()) {
+        start_date = moment(date_default_options['date_range'][0][0], 'YYYY-MM-DD').format('YYYY-MM-DD');
+      }
+      if (moment(date_default_options.date_range[date_default_options.date_range.length - 1][1], 'YYYY-MM-DD').isValid()) {
+        end_date = moment(date_default_options.date_range[date_default_options.date_range.length - 1][1], 'YYYY-MM-DD').format('YYYY-MM-DD');
+      }
+      console.log("Start date, end date ", start_date, end_date)
+
+
+      // 2. Adjust end_date using period
+      try {
+        if (date_default_options["period"] && Array.isArray(date_default_options["period"])) {
+          if (date_default_options["period"][1] !== "b" && typeof date_default_options["period"][1] !== "string") {
+            const periodOffset = date_default_options["period"][1] - 1;
+            end = moment().startOf("day").add(periodOffset, "days");
+            if (!end_date || end.isBefore(moment(end_date, "YYYY-MM-DD"))) {
+              end_date = end.format("YYYY-MM-DD");
+            }
+          }
+        }
+      } catch (err) {
+        console.log("no default period options");
+      }
+
+      console.log("Start date, end date after period ", start_date, end_date)
+
+
+      // 3. Adjust start_date using next_days
+      try {
+        if (date_default_options.next_days) {
+          start = moment().startOf("day").add(date_default_options.next_days, "days");
+          if (!start_date || moment(start_date, "YYYY-MM-DD").isBefore(start)) {
+            start_date = start.format("YYYY-MM-DD");
+          }
+        }
+      } catch {
+        console.log("no default options next days");
+      }
+
+      console.log("Start date, end date after next days ", start_date, end_date)
+
+
+      // 4. Adjust for weekdays
+      if (date_default_options.weekdays && date_default_options.weekdays.length) {
+        let weekdays = date_default_options.weekdays;
+        date_default_options.weekdays = weekdays.sort();
+        console.log("date week days is " + JSON.stringify(date_default_options.weekdays));
+
+        let next_start = null;
+        start = moment(start_date, "DD-MM-YYYY") || moment().startOf("day");
+        console.log("start of weekday is" + JSON.stringify(start) + "start day is" + JSON.stringify(start.day()));
+
+        if (start.day() == 0) {
+          console.log("date of week is 0")
+          date_default_options.weekdays.unshift(start.day())
+        }
+
+        if (date_default_options.weekdays.includes(start.day())) {
+          console.log("current date is start day");
+          if (!start_date)
+            start_date = moment().startOf("day").format("DD-MM-YYYY");
+          else if (moment(start_date, "DD-MM-YYYY").isBefore(start))
+            start_date = start.format("DD-MM-YYYY");
+        }
+        else {
+          for (let i = 0; i < date_default_options.weekdays.length; i++) {
+            if (date_default_options.weekdays[i] > start.day()) {
+              next_start = date_default_options.weekdays[i];
+              break;
+            }
+          }
+
+          if (!next_start) {
+            next_start = date_default_options.weekdays[0];
+            console.log("start of next week " + JSON.stringify(next_start));
+            // start = moment().add(1, "weeks").isoWeekday(next_start);
+          } else {
+            console.log("next heighest start" + JSON.stringify(next_start));
+            start = moment().isoWeekday(next_start);
+          }
+
+          if (moment(start_date, "DD-MM-YYYY").isBefore(start)) { start_date = start.format("DD-MM-YYYY"); }
+        }
+
+
+      }
+
+      // Fallback: if somehow dates are still null
+      if (!start_date) start_date = moment().startOf("day").format("YYYY-MM-DD");
+      if (!end_date) end_date = moment().add(1, "year").format("YYYY-MM-DD");
+
+      // Send Adaptive Card with valid min/max
+      const datePickerCard = {
+        type: "AdaptiveCard",
+        body: [
+          {
+            type: "TextBlock",
+            text: question_text,
+            wrap: true
+          },
+          {
+            type: "Input.Date",
+            id: "selectedDate",
+            placeholder: "Select a date",
+            min: start_date,
+            max: end_date
+          }
+        ],
+        actions: [
+          {
+            type: "Action.Submit",
+            title: "Submit"
+          }
+        ],
+        $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+        version: "1.3"
+      };
+
+      console.log("Final date picker card: ", JSON.stringify(datePickerCard));
+      await context.sendActivity({
+        attachments: [CardFactory.adaptiveCard(datePickerCard)]
+      });
+    }
+  }
+  else if (resp["type"] == "time") {
+    try {
+
+      let time_format = "HH:MM";
+
+      // Send image if present
+      if (
+        resp["image_url"] &&
+        resp["image_url"] !== "null" &&
+        resp["image_url"] !== ""
+      ) {
+        await context.sendActivity({
+          type: 'message',
+          attachments: [
+            {
+              contentType: 'image/png',
+              contentUrl: resp["image_url"],
+              name: 'image.png'
+            }
+          ]
+        });
+      }
+
+      // Build multi-language message if available
+      let m_text;
+      if (multi_lang.hasOwnProperty('Please Enter the time in *${time_format}* format.')) {
+        m_text = multi_lang['Please Enter the time in *${time_format}* format.'][get_language_code];
+      } else {
+        m_text = `Please Enter the time in *${time_format}* format.`;
+      }
+      console.log("mtext ",m_text)
+
+      // Final message text
+      let gtu = m_text.replace('*${time_format}*', time_format);
+      let final_message = `${question_text}\n${gtu}`;
+
+      // Send time input prompt
+      await context.sendActivity({
+        type: 'message',
+        text: final_message
+      });
+    } catch (e) {
+      console.log("error in shwoing time ",e);
+    }
 
   }
+
 
 
 }
@@ -653,33 +826,55 @@ async function handle_incomingmessages(context, prev_response, sender_id, BOT_ID
       // continue processing
     } else if (context && context.activity && context.activity.value && context.activity.value.selectedOptions) {
 
-      // Check if already submitted
-      if (userSubmissionStatus[userId]["choice"]) {
-        await context.sendActivity("You have already submitted the checkbox options");
-        return;
-      }
+      if (type1 == "checkbox") {
+        // Check if already submitted
+        if (userSubmissionStatus[userId]["choice"]) {
+          await context.sendActivity("You have already submitted the checkbox options");
+          return;
+        }
 
-      const selectedValues = context.activity.value.selectedOptions; // this will be a comma-separated string
-      const selectedArray = selectedValues.split(",");
-      await context.sendActivity(`You selected: ${selectedArray.join(", ")}`);
-      // Mark as submitted
-      userSubmissionStatus[userId]["choice"] = true;
-      answer_text = selectedArray ? selectedArray.join(";;") : null
+        const selectedValues = context.activity.value.selectedOptions; // this will be a comma-separated string
+        const selectedArray = selectedValues.split(",");
+        await context.sendActivity(`You selected: ${selectedArray.join(", ")}`);
+        // Mark as submitted
+        userSubmissionStatus[userId]["choice"] = true;
+        answer_text = selectedArray ? selectedArray.join(";;") : null
+      }
     }
     else if (context && context.activity && context.activity.value && context.activity.value.numberInput) {
 
-      console.log("inside number npu ", userSubmissionStatus[userId]["range"]);
-      // Check if already submitted
-      if (userSubmissionStatus[userId]["range"]) {
-        await context.sendActivity("You have already selected the range in number");
-        return;
-      }
+      if (type1 == "range") {
 
-      let selectedValues = context.activity.value.numberInput; // this will be a comma-separated string
-      await context.sendActivity(`You selected value: ${selectedValues}`);
-      // Mark as submitted
-      userSubmissionStatus[userId]["range"] = true;
-      answer_text = parseInt(selectedValues)
+        console.log("inside number npu ", userSubmissionStatus[userId]["range"]);
+        // Check if already submitted
+        if (userSubmissionStatus[userId]["range"]) {
+          await context.sendActivity("You have already selected the range in number");
+          return;
+        }
+
+        let selectedValues = context.activity.value.numberInput; // this will be a comma-separated string
+        await context.sendActivity(`You selected value: ${selectedValues}`);
+        // Mark as submitted
+        userSubmissionStatus[userId]["range"] = true;
+        answer_text = parseInt(selectedValues);
+      }
+    }
+    else if (context && context.activity && context.activity.value && context.activity.value.selectedDate) {
+
+      if (type1 == "date") {
+        console.log("inside number selected date  ", userSubmissionStatus[userId]["selectedDate"]);
+        // Check if already submitted
+        if (userSubmissionStatus[userId]["selectedDate"]) {
+          await context.sendActivity("You have already selected the date");
+          return;
+        }
+
+        let selectedValues = context.activity.value.selectedDate; // this will be a comma-separated string
+        await context.sendActivity(`You selected date is: ${selectedValues}`);
+        // Mark as submitted
+        userSubmissionStatus[userId]["selectedDate"] = true;
+        answer_text = selectedValues;
+      }
     }
     else {
       answer_text = null
