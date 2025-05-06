@@ -768,7 +768,7 @@ async function smatbot_facebook_automation(sender_id, resp, BOT_ID, answer, cont
       } else {
         m_text = `Please Enter the time in *${time_format}* format.`;
       }
-      console.log("mtext ",m_text)
+      console.log("mtext ", m_text)
 
       // Final message text
       let gtu = m_text.replace('*${time_format}*', time_format);
@@ -780,11 +780,369 @@ async function smatbot_facebook_automation(sender_id, resp, BOT_ID, answer, cont
         text: final_message
       });
     } catch (e) {
-      console.log("error in shwoing time ",e);
+      console.log("error in shwoing time ", e);
     }
 
   }
+  else if (resp["type"] == "file_upload") {
+    console.log("inside of file upload")
+    await context.sendActivity(MessageFactory.text(question_text, userText));
+    return "OK";
+  }
+  else if (resp['type'] == 'show_location') {
+    try {
+      // Send question text if available
+      if (resp['question_text']) {
+        await context.sendActivity(MessageFactory.text(question_text));
+      }
 
+      let default_options = JSON.parse(resp.default_options);
+
+      // If a map image should be shown (e.g., 'photo' key exists), send an Adaptive Card
+      if (default_options && default_options.hasOwnProperty('photo')) {
+        const locationCard = {
+          type: "AdaptiveCard",
+          version: "1.3",
+          body: [
+            {
+              type: "TextBlock",
+              text: question_text,
+              weight: "Bolder",
+              size: "Medium"
+            },
+            {
+              type: "Image",
+              url: default_options.photo, // Assuming photo is a static map image URL
+              size: "Stretch"
+            },
+            {
+              type: "ActionSet",
+              actions: [
+                {
+                  type: "Action.OpenUrl",
+                  title: "Open in Maps",
+                  url: default_options.map_link || "https://www.google.com/maps" // Fallback map link
+                }
+              ]
+            }
+          ],
+          $schema: "http://adaptivecards.io/schemas/adaptive-card.json"
+        };
+
+        await context.sendActivity({
+          attachments: [CardFactory.adaptiveCard(locationCard)]
+        });
+      }
+
+      // Send label text below the map if exists
+      if (default_options.label) {
+        await context.sendActivity(MessageFactory.text(default_options.label));
+      }
+
+      // Continue the flow
+      resp = await smatbot_api(
+        session_id,
+        BOT_ID,
+        'something',
+        resp['logical_jump'],
+        resp['sequence'],
+        resp["id"],
+        'sometext',
+        sender_id
+      );
+
+      if (resp.next_question && resp.next_question.length > 0) {
+        resp["next_question"][0]["cb_session"] = resp["livechat_session"];
+        await smatbot_facebook_automation(
+          sender_id,
+          resp['next_question'][0],
+          BOT_ID,
+          null,
+          context
+        );
+      } else {
+        return;
+      }
+    } catch (e) {
+      console.error("Error in show_location:", e);
+    }
+  }
+  else if (resp["type"] === "show_file") {
+    console.log("This is show_file======================>", resp);
+
+    if (resp["question_text"]) {
+      await context.sendActivity(MessageFactory.text(question_text));
+    }
+
+    const fileUrl = resp["image_url"];
+    const fileName = fileUrl?.split('/').pop() || "file.pdf";
+
+    if (fileUrl && fileUrl !== "null" && fileUrl !== "") {
+      // If it's an image (not PDF)
+      if (!fileUrl.toLowerCase().endsWith(".pdf")) {
+        await context.sendActivity({
+          type: "message",
+          attachments: [
+            {
+              contentType: "image/png",
+              contentUrl: fileUrl,
+              name: fileName
+            }
+          ]
+        });
+      } else {
+        // If it's a PDF or other file
+        await context.sendActivity({
+          attachments: [
+            {
+              contentType: "application/vnd.microsoft.teams.card.file.consent",
+              content: {
+                description: "Please download the file below.",
+                sizeInBytes: 102400, // Adjust or fetch size if available
+                acceptContext: {},
+                declineContext: {},
+                name: fileName,
+                contentUrl: fileUrl
+              },
+              name: fileName
+            }
+          ]
+        });
+      }
+    }
+
+    // Continue to next question
+    resp = await smatbot_api(
+      session_id,
+      BOT_ID,
+      "something",
+      resp["logical_jump"],
+      resp["sequence"],
+      resp["id"],
+      "sometext",
+      sender_id
+    );
+
+    if (resp.next_question && resp.next_question.length > 0) {
+      resp["next_question"][0]["cb_session"] = resp["livechat_session"];
+      await smatbot_facebook_automation(
+        sender_id,
+        resp["next_question"][0],
+        BOT_ID,
+        "something",
+        context
+      );
+    } else {
+      return;
+    }
+  }
+  else if (resp["type"] == "show_contacts") {
+    console.log("Inside show_contacts type==========================>", question_text);
+    let default_options = resp["default_options"];
+    console.log("default options include show contacts", default_options);
+    // Parse the JSON string into an array of objects
+    default_options = JSON.parse(default_options);
+    console.log("Parsed default options:", default_options);
+
+    let facts = []
+    if (default_options && default_options.length > 0) {
+      for (let i = 0; i < default_options.length; i++) {
+
+        // Log the entire object to check its structure
+        console.log("default_options item:", default_options[i]);
+
+        facts.push({
+
+          title: default_options[i].name,
+          value: default_options[i].contact
+
+        })
+
+      }
+    }
+
+
+
+    const contactCard = {
+      type: "AdaptiveCard",
+      version: "1.3",
+      body: [
+        {
+          type: "TextBlock",
+          text: question_text,
+          weight: "Bolder",
+          size: "Medium"
+        },
+        {
+          type: "FactSet",
+          facts: facts
+        }
+      ],
+      $schema: "http://adaptivecards.io/schemas/adaptive-card.json"
+    };
+
+    await context.sendActivity({
+      attachments: [
+        {
+          contentType: "application/vnd.microsoft.card.adaptive",
+          content: contactCard
+        }
+      ]
+    });
+
+    // Continue to next question
+    resp = await smatbot_api(
+      session_id,
+      BOT_ID,
+      "something",
+      resp["logical_jump"],
+      resp["sequence"],
+      resp["id"],
+      "sometext",
+      sender_id
+    );
+
+    if (resp.next_question && resp.next_question.length > 0) {
+      resp["next_question"][0]["cb_session"] = resp["livechat_session"];
+      await smatbot_facebook_automation(
+        sender_id,
+        resp["next_question"][0],
+        BOT_ID,
+        "something",
+        context
+      );
+    } else {
+      return;
+    }
+  }
+  else if (resp["type"] == "appointment") {
+    console.log("============>appointment type===============>" + JSON.stringify(answer) + "type of " + JSON.stringify(typeof resp["default_options"]) + JSON.stringify(resp["default_options"] === null));
+    // await reply(sender_id, question_text, ACCESS_TOKEN);
+    let start_date = null;
+    let end_date = null;
+    let end = null;
+    let start = null;
+    let m_text;
+    if (typeof resp["default_options"] === null) {
+      if (multi_lang.hasOwnProperty('Please set appointment booking default options')) {
+        m_text = multi_lang['Please set appointment booking default options'][get_language_code]
+      }
+      await context.sendActivity(MessageFactory.text(m_text));
+      return "ok";
+    }
+    let appointment_options = resp["default_options"];
+    appointment_options = JSON.parse(appointment_options);
+    console.log("appointment default options" + JSON.stringify(appointment_options));
+
+    if (appointment_options.date_range) {
+      if (moment(appointment_options.date_range[0][0], "YYYY-MM-DD").isValid()) {
+        start_date = moment(appointment_options.date_range[0][0], "YYYY-MM-DD").format("DD-MM-YYYY");
+      }
+
+      if (moment(appointment_options.date_range[appointment_options.date_range.length - 1][1], "YYYY-MM-DD").isValid()) {
+        end_date = moment(appointment_options.date_range[appointment_options.date_range.length - 1], "YYYY-MM-DD").format("DD-MM-YYYY");
+      }
+    }
+
+    start_date = start_date || moment().startOf("day").format("DD-MM-YYYY");
+    console.log("start_date is" + JSON.stringify(start_date));
+
+    if (appointment_options.period) {
+      if (appointment_options.period[1]) {
+        appointment_options.period[1] = appointment_options.period[1] - 1;
+        console.log("appointment options period" + JSON.stringify(appointment_options.period[1]))
+        end = moment().startOf("day").add(appointment_options.period[1], "days");
+        if (!end_date) end_date = end.format("DD-MM-YYYY");
+        else if (end.isBefore(moment(end_date, "DD-MM-YYYY"))) { end_date = end.format("DD-MM-YYYY"); }
+      }
+    }
+    console.log("end_date is " + JSON.stringify(end_date));
+
+    if (appointment_options.next_days) {
+      start = moment()
+        .startOf("day")
+        .add(appointment_options.next_days, "days");
+      if (!start_date) start_date = start;
+      else if (moment(start_date, "DD-MM-YYYY").isBefore(start))
+        start_date = start.format("DD-MM-YYYY");
+    }
+
+    console.log("start_date is after next days added " + JSON.stringify(start_date));
+
+    if (appointment_options.weekdays && appointment_options.weekdays.length) {
+      let weekdays = appointment_options.weekdays;
+      appointment_options.weekdays = weekdays.sort();
+      console.log("appointment week days" + JSON.stringify(appointment_options.weekdays))
+      let next_start = null;
+      start = moment(start_date, "DD-MM-YYYY") || moment().startOf("day");
+      console.log("start is" + JSON.stringify(start))
+
+      if (appointment_options.weekdays.includes(start.day())) {
+        console.log("current date is start day12");
+        if (!start_date)
+          start_date = moment().startOf("day").format("DD-MM-YYYY");
+        else if (moment(start_date, "DD-MM-YYYY").isBefore(start))
+          start_date = start.format("DD-MM-YYYY");
+      }
+      else {
+        for (let i = 0; i < appointment_options.weekdays.length; i++) {
+          if (appointment_options.weekdays[i] > start.day()) {
+            next_start = appointment_options.weekdays[i];
+            break;
+          }
+        }
+
+        if (!next_start) {
+          next_start = appointment_options.weekdays[0];
+          console.log("start of next week " + JSON.stringify(next_start));
+          // start = moment().add(1, "weeks").isoWeekday(next_start);
+        } else {
+          console.log("next heighest start" + JSON.stringify(next_start));
+          start = moment().isoWeekday(next_start);
+        }
+
+        if (moment(start_date, "DD-MM-YYYY").isBefore(start)) { start_date = start.format("DD-MM-YYYY"); }
+      }
+    }
+    else {
+      start_date = null;
+      end_date = null;
+    }
+
+    const dateCard = {
+      "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+      "type": "AdaptiveCard",
+      "version": "1.4",
+      "body": [
+        {
+          "type": "TextBlock",
+          "text": question_text,
+          "wrap": true
+        },
+        {
+          "type": "Input.Date",
+          "id": "appointmentDate",
+          "min": moment(start_date, "DD-MM-YYYY").format("YYYY-MM-DD"),
+          "max": moment(end_date, "DD-MM-YYYY").format("YYYY-MM-DD")
+        }
+      ],
+      "actions": [
+        {
+          "type": "Action.Submit",
+          "title": "Next",
+          "data": {
+            "type": "appointment_date_selection"
+          }
+        }
+      ]
+    };
+
+    // Send the card to the user
+    await context.sendActivity({
+      attachments: [CardFactory.adaptiveCard(dateCard)]
+    });
+    return "ok";
+  }
 
 
 }
@@ -792,9 +1150,11 @@ async function smatbot_facebook_automation(sender_id, resp, BOT_ID, answer, cont
 let userSubmissionStatus = {}; // Key = user ID, Value = true/false
 
 async function handle_incomingmessages(context, prev_response, sender_id, BOT_ID, get_language_code) {
-  console.log("inside of handle incoming ", context.activity.value)
+  console.log("inside of handle incoming ", context.activity.value,)
+
   try {
-    let session_id, is_logical, sequence, question_id, type1, default_options
+    let session_id, is_logical, sequence, question_id, type1, default_options, valid_date_time = null
+
     let get_language_code = "en";
     try {
       session_id = prev_response["cb_session"];
@@ -874,6 +1234,25 @@ async function handle_incomingmessages(context, prev_response, sender_id, BOT_ID
         // Mark as submitted
         userSubmissionStatus[userId]["selectedDate"] = true;
         answer_text = selectedValues;
+      }
+    }
+    else if (context && context.activity && context.activity.value && context.activity.value.type && context.activity.value.type == "appointment_date_selection") {
+
+      console.log("inside of checkinf appointment bookin");
+      if (type1 == "appointment") {
+        console.log("inside appointment booking   ", userSubmissionStatus[userId]["appointment_date_selection"]);
+        // Check if already submitted
+        if (userSubmissionStatus[userId]["appointment_date_selection"]) {
+          await context.sendActivity("You have already selected the date");
+          return;
+        }
+
+        let selectedValues = context.activity.value.appointmentDate; // this will be a comma-separated string
+        await context.sendActivity(`You selected appointment date is: ${selectedValues}`);
+        // Mark as submitted
+        userSubmissionStatus[userId]["appointment_date_selection"] = true;
+        answer_text = selectedValues;
+        answer_text = moment(answer_text, "YYYY-MM-DD").format("DD-MM-YYYY");
       }
     }
     else {
@@ -1078,6 +1457,548 @@ async function handle_incomingmessages(context, prev_response, sender_id, BOT_ID
 
     }
 
+    if (type1 == "time") {
+      let current_time_format = "HH:MM"
+
+      let date = new Date();
+      let dateString = date.toLocaleDateString();
+
+      let answered_date = new Date(`${dateString} ${answer_text}`);
+
+      if (answered_date == 'Invalid Date') {
+        if (multi_lang.hasOwnProperty('please enter the valid time in given format.')) {
+          er_text = multi_lang['please enter the valid time in given format.'][get_language_code]
+        };
+        await context.sendActivity(er_text);
+        return;
+      }
+
+    }
+
+    try {
+      if (prev_response['qna_prev'] && prev_response['qna_prev'][prev_response['qna_prev'].length - 1].type == "appointment") {
+
+        console.log("qnv_prev type is appointment user submitted the date ");
+
+        answer_text = answer_text.toLowerCase();
+        let regex = new RegExp(
+          "[0-9]{4}[-](0[1-9]|1[0-2])[-]([0-2]{1}[0-9]{1}|3[0-1]{1}) (0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]"
+        );
+
+        console.log("answer_text is ======================>" + JSON.stringify(answer_text));
+        if (!(regex.test(answer_text))) {
+
+
+          is_logical = prev_response["init_question"][0].logical_jump;
+          sequence = prev_response["init_question"][0].sequence;
+          current_flow_id = prev_response["init_question"][0].flow_id;
+          question_id = prev_response["init_question"][0].id;
+          type1 = prev_response["init_question"][0].type;
+          default_options = prev_response["init_question"][0].default_options;
+          is_ai_available = prev_response["init_question"][0].is_ai_available;
+
+          if (answer_text == "reselect") {
+            let session_options = {
+              url: `${smat_constants.url}/kya_backend/clientUtils/getSessionid`,
+              qs: {
+                cb_session: prev_response.cb_session
+              },
+              method: "GET",
+            };
+
+            let response = await sendMessage(session_options);
+            if (response instanceof Error) return response;
+            response = JSON.parse(response);
+
+            // let last_answered_date = await smatbot_db.delete_last_answer(
+            //   response.session_id,
+            //   question_id
+            // );
+
+            // if (!last_answered_date) {
+            //   await reply(
+            //     sender_id,
+            //     'Error in reslecting the date please try after sometime.',
+            //     ACCESS_TOKEN,
+            //     connection_type
+            //   );
+
+            //   // request_response.send("OK");
+            //   return;
+            // }
+            // else {
+            //   console.log("======>deleting previous question answer===========>");
+            //   let question_details_before_appointment = null;
+            //   let question_before_appointment =
+            //     await smatbot_db.get_previous_question(response.session_id);
+            //   let appointment_question = {};
+            //   if (question_before_appointment instanceof Error) {
+            //     console.log("question before appointment")
+            //     await reply(
+            //       sender_id,
+            //       "Error in reslecting the date,restarting the flow.",
+            //       ACCESS_TOKEN,
+            //       connection_type
+            //     );
+            //     deleteSession(prev_response["cb_session"]);
+            //     await refresh_chat(BOT_ID, user_number, prev_response["cb_session"]);
+            //     setsession(prev_response["cb_session"], sender_details);
+
+            //     resp = await smatbot_api_started(BOT_ID, user_number, payload);
+            //     await smatbot_db.insert_sender_id(
+            //       sender_id,
+            //       prev_response["cb_session"],
+            //       user_number,
+            //       user_name, BOT_ID
+            //     );
+
+            //     if (resp["init_question"] && resp["init_question"][0]) {
+            //       resp["init_question"][0]["cb_session"] = prev_response["cb_session"];
+            //       smatbot_facebook_automation(
+            //         sender_id,
+            //         prev_response["init_question"][0],
+            //         ACCESS_TOKEN,
+            //         BOT_ID,
+            //         instagram_business_id,
+            //         recepient_name,
+            //         null,
+            //         message_id,
+            //         connection_type
+            //       );
+            //     }
+            //     // request_response.send("OK");
+            //   }
+            //   else {
+            //     if (prev_response && prev_response["init_question"][0].id) {
+            //       question_details_before_appointment =
+            //         await smatbot_db.get_previous_question_type(
+            //           prev_response['init_question'][0].id
+            //         );
+
+            //       if (!question_details_before_appointment) {
+            //         // request_response.send("ok");
+            //         return;
+            //       }
+
+            //       if (question_details_before_appointment instanceof Error) {
+            //         await reply(
+            //           sender_id,
+            //           'Error in reselecting the date,restarting the flow.',
+            //           ACCESS_Token,
+            //           connection_type
+            //         );
+            //         deleteSession(prev_response["cb_session"]);
+            //         await refresh_chat(BOT_ID, sender_id, prev_response["cb_session"]);
+            //         setsession(prev_response["cb_session"], sender_details);
+            //         resp = await smatbot_api_started(BOT_ID, user_number, payload);
+            //         await smatbot_db.insert_sender_id(
+            //           sender_id,
+            //           prev_response["cb_session"],
+            //           user_number,
+            //           user_name, BOT_ID
+            //         );
+            //         if (prev_response["init_question"] && prev_response["init_question"][0]) {
+            //           prev_response["init_question"][0]["cb_session"] = prev_response["cb_session"];
+            //           smatbot_facebook_automation(
+            //             sender_id,
+            //             prev_response["init_question"][0],
+            //             ACCESS_TOKEN,
+            //             BOT_ID,
+            //             instagram_business_id,
+            //             recepient_name,
+            //             null,
+            //             message_id,
+            //             connection_type
+            //           );
+            //         }
+            //       }
+            //       else {
+            //         console.log("after question details appointment");
+            //         prev_response.next_question = prev_response.next_question || [];
+            //         appointment_question = prev_response["init_question"] || prev_response["next_question"][0];
+
+            //         appointment_question = {
+            //           ...appointment_question, ...question_details_before_appointment
+            //         }
+            //         appointment_question["cb_session"] = prev_response["cb_session"];
+
+            //         smatbot_facebook_automation(
+            //           sender_id,
+            //           appointment_question,
+            //           ACCESS_TOKEN,
+            //           BOT_ID,
+            //           instagram_business_id,
+            //           recepient_name,
+            //           null,
+            //           message_id,
+            //           connection_type
+            //         );
+            //         // request_response.send("OK");
+            //         return;
+            //       }
+            //     }
+            //   }
+            // }
+          }
+          else {
+            add_params.question_type = "appointment_time";
+            valid_date_time = true;
+          }
+        }
+      }
+    }
+    catch (err) {
+      console.log("no appointment prev type ", err)
+    }
+
+    if (type1 == "appointment") {
+      console.log("answer text is appointment booking");
+      if (multi_lang.hasOwnProperty('Enter *Reselect* to change the date.')) er_text = multi_lang['Enter *Reselect* to change the date.'][get_language_code];
+      // valid_date_time = true;
+      let add_message = er_text
+      add_params = {
+        question_channel: "whatsapp",
+        question_type: "appointment",
+      }
+      if (valid_date_time) {
+        console.log("valid date time is true");
+
+        let createslotoptions = {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          form: {
+            chatbot_id: BOT_ID,
+            cb_session: prev_response["cb_session"],
+            question_id: prev_response["init_question"][0].id,
+          },
+          url: `${smat_constants.url}/kya_backend/pagehub/createAppointment`,
+          request_channel: true,
+        };
+        // dec_session_id =await deleteSession(prev_response['cb_session'])
+        let sent_options = await getappointmentoptions(prev_response["cb_session"]);
+        console.log("sent options is" + JSON.stringify(sent_options));
+        if (!sent_options || sent_options instanceof Error) {
+          // console.log("sent options is " + sent_options);
+          if (multi_lang.hasOwnProperty('Error occured in booking your slot, please select another slot.')) er_text = multi_lang['Error occured in booking your slot, please select another slot.'][get_language_code];
+          await reply(
+            sender_id,
+            er_text,
+            ACCESS_TOKEN,
+            connection_type,
+            add_message
+          );
+
+          // request_response.send("OK");
+          return;
+        }
+
+        sent_options = sent_options.toLowerCase();
+        sent_options = sent_options.split(",");
+        answer_text = answer_text.toLowerCase();
+        // console.log("sent options is3044" + JSON.stringify(sent_options) + "answer text is" + JSON.stringify(answer_text))
+
+        if (!sent_options.includes(answer_text)) {
+          if (multi_lang.hasOwnProperty('Please enter a Valid number that is displayed in the options.')) er_text = multi_lang['Please enter a Valid number that is displayed in the options.'][get_language_code];
+          try {
+            let option_value = answer_text;
+            if (option_value > 0 && option_value <= sent_options.length) {
+              answer_text = sent_options[option_value - 1];
+            }
+            else {
+              console.log("inside try block")
+              await reply(
+                sender_id,
+                er_text,
+                ACCESS_TOKEN,
+                connection_type,
+                add_message
+              );
+              return;
+            }
+          }
+          catch {
+            console.log("insdie catch")
+            await reply(
+              sender_id,
+              er_text,
+              ACCESS_TOKEN,
+              connection_type,
+              add_message
+            );
+
+            return;
+          }
+        }
+
+        console.log("answer text after checking sent options response " + JSON.stringify(answer_text));
+
+        answer_text = answer_text.replace(/am/, "AM"),
+          answer_text = answer_text.replace(/pm/, "PM");
+        // let prev_question =await previous_question(BOT_ID,sender_id)
+        let prev_question = prev_response['qna_prev'][prev_response['qna_prev'].length - 1]
+        console.log("PREV question appointment qnq_prev is" + JSON.stringify(prev_question));
+        answer_text = prev_question.answer_text + " " + answer_text;
+        createslotoptions.form.time = moment(answer_text, "DD-MM-YYYY hh:mm: A").format("YYYY-MM-DD HH:mm:ss");
+
+        try {
+          default_options = default_options || "{}"
+          default_options = JSON.parse(default_options);
+          if (default_options.timezone.length == 2) {
+            default_options.timezone = default_options.timezone[0] + "0" + default_options.timezone[1] + ":00";
+          }
+          createslotoptions.form.time =
+            createslotoptions.form.time + default_options.timezone;
+          choosen_tz = default_options.timezone;
+          default_options = JSON.stringify(default_options);
+          // console.log("createslotoptions -------> " + JSON.stringify(createslotoptions.form));
+
+        }
+        catch (_) {
+          // console.log("not create slot options")
+        }
+        let createslot_response = await sendMessage(createslotoptions);
+        // console.log("create slot response ---> " + JSON.stringify(createslot_response));
+
+        if (multi_lang.hasOwnProperty('Error occured in booking your slot, please select another slot.')) er_text = multi_lang['Error occured in booking your slot, please select another slot.'][get_language_code];
+
+        if (createslot_response instanceof Error) {
+          await reply(
+            sender_id,
+            er_text,
+            ACCESS_TOKEN,
+            connection_type,
+            add_message
+          );
+
+          // request_response.send("OK");
+          return;
+        }
+        else {
+          createslot_response = JSON.parse(createslot_response);
+
+          try {
+            if (!createslot_response.status) {
+              default_options = default_options || "{}";
+              default_options = JSON.parse(default_options);
+              await deleteappointmentoptions(dec_session_id);
+              default_options.timezone = choosen_tz || default_options.timezone;
+              default_options.current_time = moment()
+                .utcOffset(default_options.timezone)
+                .format("HH:mm");
+              default_options.current_time = default_options.current_time + ":00";
+              let additional_text = await getslots(
+                default_options,
+                answer_text,
+                prev_response.cb_session,
+                BOT_ID,
+                prev_response['init_question'][0].id
+              );
+
+              if (multi_lang.hasOwnProperty('Please select the slot from below.')) er_text = multi_lang['Please select the slot from below.'][get_language_code];
+              await reply(
+                sender_id,
+                `${createslot_response.msg} \n${er_text}\n${additional_text}`,
+                ACCESS_TOKEN,
+                BOT_ID,
+                connection_type,
+                add_message
+              );
+              // request_response.send("OK");
+              return;
+
+            }
+            else {
+              if (multi_lang.hasOwnProperty('Appointment booked successfully')) er_text = multi_lang['Appointment booked successfully'][get_language_code];
+              await reply(
+                sender_id,
+                er_text,
+                ACCESS_TOKEN,
+                connection_type
+              );
+
+            }
+          }
+          catch (_) {
+            if (multi_lang.hasOwnProperty('Error occured in booking your slot, please select another slot.')) er_text = multi_lang['Error occured in booking your slot, please select another slot.'][get_language_code];
+            await reply(
+              sender_id,
+              er_text,
+              ACCESS_TOKEN,
+              connection_type,
+              BOT_ID,
+              add_message
+            );
+
+            // request_response.send("OK");
+            return;
+          }
+        }
+        let dec_session_id = await deleteSession(prev_response['cb_session']);
+        console.log("dec_session_id============>" + JSON.stringify(dec_session_id));
+        await deleteappointmentoptions(dec_session_id);
+        answer_text = createslotoptions.form.time;
+        console.log("answer_text if date_time validated============>" + JSON.stringify(answer_text));
+        add_params = '';
+      }
+      else {
+        default_options = default_options || "{}";
+        let regex = new RegExp('^(([0-2]{1}[0-9]{1}|3[0-1]{1})[-](0[1-9]|1[0-2])[-][0-9]{4})$');
+        console.log("answer text is " + JSON.stringify(answer_text) + "answer text is mathching regexp " + JSON.stringify(regex.test(answer_text)));
+
+        if (!(regex.test(answer_text))) {
+          if (multi_lang.hasOwnProperty('please enter a valid date.')) er_text = multi_lang['please enter a valid date.'][get_language_code];
+          await context.sendActivity(MessageFactory.text(er_text, answer_text));
+          return;
+        }
+        else if (!(moment(answer_text, "DD-MM-YYYY").isValid())) {
+          if (multi_lang.hasOwnProperty('please enter a valid date.')) er_text = multi_lang['please enter a valid date.'][get_language_code];
+          await context.sendActivity(MessageFactory.text(er_text, answer_text));
+          return;
+        }
+        else {
+          default_options = JSON.parse(default_options);
+          date_of_week = moment(answer_text, "DD-MM-YYYY");
+          date_of_week = date_of_week.day();
+          day_of_weekend = date_to_day_map[date_of_week];
+
+          if (default_options && default_options.weekdays.length > 0 && default_options.weekdays.indexOf(date_of_week) < 0) {
+            console.log("checking week days===========>" + JSON.stringify(date_of_week) + " for BOT_ID " + BOT_ID);
+            if (multi_lang.hasOwnProperty('Sorry ${day_of_weekend} are not available. \n Please try a different day.')) {
+              er_text = multi_lang['Sorry ${day_of_weekend} are not available. \n Please try a different day.'][get_language_code];
+            }
+            let err_text = er_text.replace('${day_of_weekend}', day_of_weekend)
+            await context.sendActivity(MessageFactory.text(err_text, answer_text));
+
+            return;
+          }
+
+
+          default_options.weekdays = default_options.weekdays || [];
+          if (default_options.date_range) {
+            let date_not_range;
+            console.log("date not range is checking " + JSON.stringify(date_not_range))
+            check_date = moment(answer_text, "DD-MM-YYYY");
+            for (let range = 0; range < default_options.date_range.length; range++) {
+              if (moment(default_options.date_range[range][0], "YYYY-MM-DD").isValid()) {
+                console.log("is valid date range is 0");
+                if (!check_date.isSameOrAfter(moment(default_options.date_range[range][0]))) {
+                  date_not_range = true
+                }
+              }
+
+
+              if (moment(default_options.date_range[range][1], "YYYY-MM-DD").isValid()) {
+                if (!check_date.isSameOrBefore(moment(default_options.date_range[range][1]))) {
+                  date_not_range = true;
+                }
+              }
+
+
+            }
+
+
+            if (check_date.isBefore(moment().startOf("day"))) {
+              date_not_range = true;
+            }
+
+            if (date_not_range) {
+              if (multi_lang.hasOwnProperty('The date you have entered is not available. Please enter a different date in the available range mentioned.')) er_text = multi_lang['The date you have entered is not available. Please enter a different date in the available range mentioned.'][get_language_code];
+              await context.sendActivity(MessageFactory.text(er_text, answer_text));
+              return;
+            }
+
+
+            default_options.period = default_options.period || [];
+
+            if (default_options.period[1] !== "b") {
+              let disable_start = moment().startOf("day");
+              let add_days = default_options.period[1]
+              console.log("add days is " + JSON.stringify(add_days))
+              let disable_end = moment(disable_start, "DD-MM-YYYY").add('days', add_days);
+              check_date = moment(answer_text, "DD-MM-YYYY");
+              console.log("disable start " + JSON.stringify(disable_start) + "disable end " + JSON.stringify(disable_end) + "check date " + JSON.stringify(check_date) + "checking date is " + JSON.stringify((check_date.isSameOrAfter(disable_start) && check_date.isBefore(disable_end))));
+
+              if (!(check_date.isSameOrAfter(disable_start) && check_date.isBefore(disable_end))) {
+
+                if (multi_lang.hasOwnProperty('The date you have entered is not available. Please enter a different date in the available range mentioned.')) er_text = multi_lang['The date you have entered is not available. Please enter a different date in the available range mentioned.'][get_language_code];
+
+                await context.sendActivity(MessageFactory.text(er_text, answer_text));
+                return;
+              }
+            }
+
+            // console.log("default options next days is" + JSON.stringify(default_options.next_days));
+
+            if (default_options.next_days) {
+              console.log("default option next day block");
+              let disable_start = moment().startOf("day");
+              let disable_end = moment(disable_start, "DD-MM-YYYY").add(default_options.next_days, "days");
+              check_date = moment(answer_text, "DD-MM-YYYY");
+
+              if (check_date.isSameOrAfter(disable_start) && check_date.isBefore(disable_end)) {
+                if (multi_lang.hasOwnProperty('The date you have entered is not available. Please enter a different date in the available range mentioned.')) er_text = multi_lang['The date you have entered is not available. Please enter a different date in the available range mentioned.'][get_language_code];
+
+                await context.sendActivity(MessageFactory.text(er_text, answer_text));
+                return;
+              }
+            }
+
+            //sundays and saturday slots is unavailable
+
+            if ((!default_options.weekdays.includes(date_of_week) || date_of_week == 6) && smat_constants.weekends_disabled_bot_ids_list.includes(BOT_ID)) {
+              console.log("default options does not includes week days" + JSON.stringify(date_of_week))
+              if (date_of_week == 0) {
+                date_of_week = 7;
+              }
+              day_of_weekend = date_to_day_map[date_of_week];
+              console.log("date_of_weekend3" + JSON.stringify(day_of_weekend))
+
+              let er_text;
+
+              if (multi_lang.hasOwnProperty('Sorry ${day_of_weekend} are not available. \n Please try a different day.')) {
+                er_text = multi_lang['Sorry ${day_of_weekend} are not available. \n Please try a different day.'][get_language_code];
+              }
+              console.log("error text day of weekend" + JSON.stringify(er_text))
+              let err_text = er_text.replace('${day_of_weekend}', day_of_weekend)
+              await context.sendActivity(MessageFactory.text(err_text, answer_text));
+              return;
+            }
+            console.log("checked next_days logic");
+          }
+        }
+      }
+
+      resp = await smatbot_api(
+        session_id,
+        BOT_ID,
+        answer_text,
+        is_logical,
+        sequence,
+        question_id,
+        add_params,
+        sender_id,
+      );
+
+      if (!valid_date_time) {
+        resp["next_question"][0].answer_text = answer_text;
+        resp["next_question"][0].cb_session = resp.cb_session;
+      }
+
+      if (resp["next_question"] && resp["next_question"].length) {
+        console.log("checked livechat session", resp["livechat_session"]);
+        valid_date_time ? resp["next_question"][0]["cb_session"] = resp["livechat_session"] : resp["next_question"][0].cb_session = resp.cb_session;
+
+        await smatbot_facebook_automation(
+          sender_id,
+          resp["next_question"][0],
+          BOT_ID,
+          null,
+          context
+        );
+        return;
+      }
+
+    }
 
     if (
       [
